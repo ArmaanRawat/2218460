@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, useParams, useNavigate } from "react-router-dom";
 import { log } from "./logging.js";
 import {
   Box,
@@ -257,11 +257,111 @@ function ShortenerPage() {
 }
 
 function StatsPage() {
-  return <div>Statistics Page (to be implemented)</div>;
+  const [urls, setUrls] = useState([]);
+
+  useEffect(() => {
+    setUrls(loadShortenedUrls());
+  }, []);
+
+  return (
+    <Container maxWidth="md" sx={{ mt: 4 }}>
+      <Typography variant="h4" gutterBottom>
+        URL Statistics
+      </Typography>
+      <Paper sx={{ p: 3 }}>
+        {urls.length === 0 ? (
+          <Typography>No URLs shortened yet.</Typography>
+        ) : (
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <Box display="flex" fontWeight="bold" gap={2}>
+                <Box sx={{ minWidth: 120 }}>Shortcode</Box>
+                <Box sx={{ flex: 1 }}>Original URL</Box>
+                <Box sx={{ minWidth: 120 }}>Created</Box>
+                <Box sx={{ minWidth: 120 }}>Expires</Box>
+                <Box sx={{ minWidth: 80 }}>Clicks</Box>
+              </Box>
+            </Grid>
+            {urls.map((r, idx) => (
+              <Grid item xs={12} key={idx}>
+                <Box display="flex" alignItems="center" gap={2}>
+                  <Box sx={{ minWidth: 120 }}>{r.shortcode}</Box>
+                  <Box sx={{ flex: 1, wordBreak: "break-all" }}>
+                    {r.longUrl}
+                  </Box>
+                  <Box sx={{ minWidth: 120 }}>
+                    {new Date(r.createdAt).toLocaleString()}
+                  </Box>
+                  <Box sx={{ minWidth: 120 }}>
+                    {new Date(r.expiresAt).toLocaleString()}
+                  </Box>
+                  <Box sx={{ minWidth: 80 }}>
+                    {r.clicks ? r.clicks.length : 0}
+                  </Box>
+                </Box>
+              </Grid>
+            ))}
+          </Grid>
+        )}
+      </Paper>
+    </Container>
+  );
 }
 
 function RedirectHandler() {
-  return <div>Redirect Handler (to be implemented)</div>;
+  const { shortcode } = useParams();
+  const navigate = useNavigate();
+  const [status, setStatus] = useState("loading");
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    const urls = loadShortenedUrls();
+    const entryIdx = urls.findIndex((r) => r.shortcode === shortcode);
+    if (entryIdx === -1) {
+      setStatus("error");
+      setMessage("Shortcode not found.");
+      return;
+    }
+    const entry = urls[entryIdx];
+    const now = new Date();
+    if (new Date(entry.expiresAt) < now) {
+      setStatus("error");
+      setMessage("This link has expired.");
+      return;
+    }
+    // Log the click
+    const click = { timestamp: now.toISOString() };
+    entry.clicks = entry.clicks || [];
+    entry.clicks.push(click);
+    urls[entryIdx] = entry;
+    saveShortenedUrls(urls);
+    setStatus("redirecting");
+    setMessage("Redirecting...");
+    setTimeout(() => {
+      window.location.href = entry.longUrl;
+    }, 1200);
+  }, [shortcode]);
+
+  return (
+    <Container maxWidth="sm" sx={{ mt: 8 }}>
+      <Paper sx={{ p: 4, textAlign: "center" }}>
+        <Typography variant="h5" gutterBottom>
+          {status === "loading" && "Checking link..."}
+          {status === "redirecting" && "Redirecting..."}
+          {status === "error" && "Error"}
+        </Typography>
+        <Typography>{message}</Typography>
+        {status === "error" && (
+          <Button
+            variant="contained"
+            sx={{ mt: 2 }}
+            onClick={() => navigate("/")}>
+            Go Home
+          </Button>
+        )}
+      </Paper>
+    </Container>
+  );
 }
 
 function App() {
