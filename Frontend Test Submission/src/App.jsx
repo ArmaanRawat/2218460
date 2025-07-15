@@ -1,12 +1,259 @@
 import { useState, useEffect } from "react";
 import { Routes, Route } from "react-router-dom";
-import reactLogo from "./assets/react.svg";
-import viteLogo from "/vite.svg";
-import "./App.css";
 import { log } from "./logging.js";
+import {
+  Box,
+  Button,
+  Container,
+  Grid,
+  TextField,
+  Typography,
+  Paper,
+  IconButton,
+} from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
+import RemoveIcon from "@mui/icons-material/Remove";
+
+function generateShortcode(existingShortcodes) {
+  const chars =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let code;
+  do {
+    code = Array.from(
+      { length: 6 },
+      () => chars[Math.floor(Math.random() * chars.length)]
+    ).join("");
+  } while (existingShortcodes.has(code));
+  return code;
+}
+
+function getNowISO() {
+  return new Date().toISOString();
+}
+
+function getExpiryISO(minutes) {
+  return new Date(Date.now() + minutes * 60000).toISOString();
+}
+
+function loadShortenedUrls() {
+  try {
+    return JSON.parse(localStorage.getItem("shortenedUrls")) || [];
+  } catch {
+    return [];
+  }
+}
+
+function saveShortenedUrls(urls) {
+  localStorage.setItem("shortenedUrls", JSON.stringify(urls));
+}
 
 function ShortenerPage() {
-  return <div>Shortener Page (to be implemented)</div>;
+  const [inputs, setInputs] = useState([
+    { longUrl: "", validity: "", shortcode: "" },
+  ]);
+  const [errors, setErrors] = useState([{}]);
+  const [results, setResults] = useState(loadShortenedUrls());
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    saveShortenedUrls(results);
+  }, [results]);
+
+  const validateUrl = (url) => {
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const validateInputs = () => {
+    const existingShortcodes = new Set(results.map((r) => r.shortcode));
+    const errs = inputs.map((input, idx) => {
+      const err = {};
+      if (!input.longUrl) err.longUrl = "URL required";
+      else if (!validateUrl(input.longUrl)) err.longUrl = "Invalid URL";
+      if (
+        input.validity &&
+        (!/^[0-9]+$/.test(input.validity) || parseInt(input.validity) <= 0)
+      )
+        err.validity = "Enter positive integer (minutes)";
+      if (input.shortcode) {
+        if (!/^[a-zA-Z0-9]{4,12}$/.test(input.shortcode))
+          err.shortcode = "4-12 alphanumeric chars";
+        else if (existingShortcodes.has(input.shortcode))
+          err.shortcode = "Shortcode already used";
+      }
+      return err;
+    });
+    setErrors(errs);
+    return errs.every((e) => Object.keys(e).length === 0);
+  };
+
+  const handleInputChange = (idx, field, value) => {
+    setInputs((inputs) =>
+      inputs.map((input, i) =>
+        i === idx ? { ...input, [field]: value } : input
+      )
+    );
+  };
+
+  const handleAdd = () => {
+    if (inputs.length < 5) {
+      setInputs([...inputs, { longUrl: "", validity: "", shortcode: "" }]);
+      setErrors([...errors, {}]);
+    }
+  };
+
+  const handleRemove = (idx) => {
+    setInputs(inputs.filter((_, i) => i !== idx));
+    setErrors(errors.filter((_, i) => i !== idx));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    if (!validateInputs()) {
+      await log("ShortenerPage", "error", "frontend", "Validation failed");
+      setSubmitting(false);
+      return;
+    }
+    const existingShortcodes = new Set(results.map((r) => r.shortcode));
+    const newResults = [];
+    for (let i = 0; i < inputs.length; ++i) {
+      const { longUrl, validity, shortcode } = inputs[i];
+      let code = shortcode || generateShortcode(existingShortcodes);
+      existingShortcodes.add(code);
+      const createdAt = getNowISO();
+      const expiresAt = getExpiryISO(validity ? parseInt(validity) : 30);
+      const newEntry = {
+        longUrl,
+        shortcode: code,
+        createdAt,
+        expiresAt,
+        clicks: [],
+      };
+      newResults.push(newEntry);
+      await log(
+        "ShortenerPage",
+        "info",
+        "frontend",
+        `Shortened: ${longUrl} as ${code}`
+      );
+    }
+    setResults([...results, ...newResults]);
+    setInputs([{ longUrl: "", validity: "", shortcode: "" }]);
+    setErrors([{}]);
+    setSubmitting(false);
+  };
+
+  return (
+    <Container maxWidth="md" sx={{ mt: 4 }}>
+      <Typography variant="h4" gutterBottom>
+        URL Shortener
+      </Typography>
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <form onSubmit={handleSubmit}>
+          <Grid container spacing={2}>
+            {inputs.map((input, idx) => (
+              <Grid item xs={12} key={idx}>
+                <Box display="flex" alignItems="center" gap={2}>
+                  <TextField
+                    label="Long URL"
+                    value={input.longUrl}
+                    onChange={(e) =>
+                      handleInputChange(idx, "longUrl", e.target.value)
+                    }
+                    error={!!errors[idx]?.longUrl}
+                    helperText={errors[idx]?.longUrl}
+                    fullWidth
+                  />
+                  <TextField
+                    label="Validity (min)"
+                    value={input.validity}
+                    onChange={(e) =>
+                      handleInputChange(idx, "validity", e.target.value)
+                    }
+                    error={!!errors[idx]?.validity}
+                    helperText={errors[idx]?.validity || "Default: 30"}
+                    sx={{ width: 120 }}
+                  />
+                  <TextField
+                    label="Custom Shortcode"
+                    value={input.shortcode}
+                    onChange={(e) =>
+                      handleInputChange(idx, "shortcode", e.target.value)
+                    }
+                    error={!!errors[idx]?.shortcode}
+                    helperText={errors[idx]?.shortcode || "Optional"}
+                    sx={{ width: 180 }}
+                  />
+                  {inputs.length > 1 && (
+                    <IconButton
+                      onClick={() => handleRemove(idx)}
+                      aria-label="remove">
+                      <RemoveIcon />
+                    </IconButton>
+                  )}
+                </Box>
+              </Grid>
+            ))}
+            <Grid item xs={12}>
+              <Box display="flex" alignItems="center" gap={2}>
+                <Button
+                  variant="outlined"
+                  startIcon={<AddIcon />}
+                  onClick={handleAdd}
+                  disabled={inputs.length >= 5}>
+                  Add URL
+                </Button>
+                <Button type="submit" variant="contained" disabled={submitting}>
+                  Shorten
+                </Button>
+              </Box>
+            </Grid>
+          </Grid>
+        </form>
+      </Paper>
+      <Typography variant="h5" gutterBottom>
+        Shortened URLs
+      </Typography>
+      <Paper sx={{ p: 2 }}>
+        {results.length === 0 ? (
+          <Typography>No URLs shortened yet.</Typography>
+        ) : (
+          <Grid container spacing={2}>
+            {results.map((r, idx) => (
+              <Grid item xs={12} key={idx}>
+                <Box display="flex" alignItems="center" gap={2}>
+                  <Typography variant="body1" sx={{ minWidth: 120 }}>
+                    <a
+                      href={`/${r.shortcode}`}
+                      target="_blank"
+                      rel="noopener noreferrer">
+                      {window.location.origin}/{r.shortcode}
+                    </a>
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{ flex: 1, wordBreak: "break-all" }}>
+                    {r.longUrl}
+                  </Typography>
+                  <Typography variant="caption">
+                    Created: {new Date(r.createdAt).toLocaleString()}
+                  </Typography>
+                  <Typography variant="caption">
+                    Expires: {new Date(r.expiresAt).toLocaleString()}
+                  </Typography>
+                </Box>
+              </Grid>
+            ))}
+          </Grid>
+        )}
+      </Paper>
+    </Container>
+  );
 }
 
 function StatsPage() {
